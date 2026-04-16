@@ -32,8 +32,32 @@ class RaftNode:
             with socket.socket(socket.AF_INET,socket.SOCK_STREAM) as sock: 
                 sock.connect((self.Host,self.PORT[ne]))
                 sock.sendall(payload)
+    def receive_vote(self):
+         with socket.socket(socket.AF_INET,socket.SOCK_STREAM) as sock:
+            sock.bind((self.Host,self.PORT[self.node_id]))
+            sock.listen(128)
+            while True:
+                conn,addr = sock.accept()
+                payload = conn.recv(65552).decode('utf-8')
+                payload = json.loads(payload)
+                if payload["term"] < self.current_term:
+                    response= {"Id":self.node_id,"Voted":False}
+                    conn.send(json.dumps(response).encode('utf-8'))
+                    conn.close()
+                    continue
+                with self.lock:
+                    if self.votedFor == None or self.votedFor == payload["candidateId"]:
+                        if payload["lastLogIndex"]>=len(self.log) and payload["lastLogTerm"]>=self.log[len(self.log)-1]["term"] if len(self.log) != 0 else 0:
+                            response = {"Id":self.node_id,"Voted":True}
+                            self.votedFor= payload["candidateId"]
+                            conn.send(json.dumps(response).encode('utf-8'))
+                        else:
+                            response= {"Id":self.node_id,"Voted":False}
+                            conn.send(json.dumps(response).encode('utf-8'))
+                conn.close()
 
-
+            
+                
     def watchdog(self):
         while True:
             if time.time() - self.last_heartbeat > self.election_timemout:
