@@ -8,7 +8,7 @@ import json
 class RaftNode:
     Host = '127.0.0.1'
     PORT = {i:5000+i for i in range(10)}
-    def __init__(self, node_id,nei:dict,current_term=0,):
+    def __init__(self, node_id,nei,current_term=0,):
         self.lock = threading.Lock()
         self.node_id = node_id
         self.current_term = current_term
@@ -61,6 +61,7 @@ class RaftNode:
                 if totalVote>= self.N//2+1:
                     with self.lock:
                         self.state="Leader"
+                        print(f"[Node {self.node_id}] I am the LEADER for term {self.current_term}")
                         threading.Thread(target=self.Leader,daemon=True).start()
                         break
     def handle_append_entries(self,conn,payload):
@@ -89,6 +90,7 @@ class RaftNode:
                     self.current_term=payload["term"]
                     self.last_heartbeat = time.time()
                     response= {"success":True,"term":self.current_term}
+                    print(f"[Node {self.node_id}] Heartbeat from leader {payload['leaderID']}")
                     conn.send(json.dumps(response).encode("utf-8"))
                 return True
 
@@ -105,6 +107,7 @@ class RaftNode:
                     response = {"Id":self.node_id,"Voted":True}
                     self.votedFor= payload["candidateId"]
                     conn.send(json.dumps(response).encode('utf-8'))
+                    print(f"[Node {self.node_id}] Voted for {payload['candidateId']} in term {payload['term']}")
                 else:
                     response= {"Id":self.node_id,"Voted":False}
                     conn.send(json.dumps(response).encode('utf-8'))
@@ -135,7 +138,7 @@ class RaftNode:
                     self.election_timemout = random.randint(150,300)/1000
                     self.last_heartbeat = time.time()
                     threading.Thread(target=self.send_vote_request,daemon=True).start()
-                    pass
+                    print(f"[Node {self.node_id}] Election timeout! Starting election for term {self.current_term}")
             time.sleep(50/1000)
 
 
