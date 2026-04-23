@@ -3,7 +3,8 @@ import random
 import threading
 import socket
 import json
-
+import functools
+print = functools.partial(print, flush=True)
 
 class RaftNode:
     Host = '127.0.0.1'
@@ -18,23 +19,26 @@ class RaftNode:
         self.commitIndex = 0
         self.lastApplied =0
         self.nei = nei
-        self.election_timemout = random.randint(150,300)/1000
+        self.election_timemout = random.randint(3000,5000)/1000
         self.last_heartbeat = time.time()
         self.N = len(self.nei) + 1
         self.leaderID = None
     
     def send_heartbeat(self):
-        for ne in self.nei:
-            with socket.socket(socket.AF_INET,socket.SOCK_STREAM) as sock: 
-                sock.connect((self.Host,self.PORT[ne]))
-                with self.lock:
-                    response = {
-                        "type" : "AppendEntries",
-                        "term" : self.current_term,
-                        "leaderID" : self.node_id,
-                        "entries":[]
-                    }
-                sock.send(json.dumps(response).encode("utf-8"))
+        try:
+            for ne in self.nei:
+                with socket.socket(socket.AF_INET,socket.SOCK_STREAM) as sock: 
+                    sock.connect((self.Host,self.PORT[ne]))
+                    with self.lock:
+                        response = {
+                            "type" : "AppendEntries",
+                            "term" : self.current_term,
+                            "leaderID" : self.node_id,
+                            "entries":[]
+                        }
+                    sock.send(json.dumps(response).encode("utf-8"))
+        except Exception as e:
+            print("HeartBeat Errror")
     def Leader(self):
         self.nextIndex = {ne: len(self.log) + 1 for ne in self.nei}
         self.matchIndex = {ne: 0 for ne in self.nei}
@@ -43,27 +47,31 @@ class RaftNode:
             time.sleep(50/1000)
     
     def send_vote_request(self):
+        print(f"[Node {self.node_id}] send_vote_request called for term {self.current_term}", flush=True)
         with self.lock:
-            self.current_term+=1
             self.state = "Candidate"
-            data = {"term":self.current_term,"candidateId":self.node_id,"lastLogIndex":len(self.log)-1, "lastLogTerm":self.log[len(self.log)-1]["term"] if len(self.log) != 0 else 0}
+            data = {"type":"vote","term":self.current_term,"candidateId":self.node_id,"lastLogIndex":len(self.log)-1, "lastLogTerm":self.log[len(self.log)-1]["term"] if len(self.log) != 0 else 0}
         payload = json.dumps(data).encode("utf-8")
         totalVote = 1
         
         for ne in self.nei:
-            with socket.socket(socket.AF_INET,socket.SOCK_STREAM) as sock: 
-                sock.connect((self.Host,self.PORT[ne]))
-                sock.sendall(payload)
-                result = sock.recv(1028).decode('utf-8')
-                voted = json.loads(result)
-                if voted["Voted"]:
-                    totalVote+=1
-                if totalVote>= self.N//2+1:
-                    with self.lock:
-                        self.state="Leader"
-                        print(f"[Node {self.node_id}] I am the LEADER for term {self.current_term}")
-                        threading.Thread(target=self.Leader,daemon=True).start()
-                        break
+            try:
+                with socket.socket(socket.AF_INET,socket.SOCK_STREAM) as sock: 
+                    sock.connect((self.Host,self.PORT[ne]))
+                    sock.sendall(payload)
+                    result = sock.recv(1028).decode('utf-8')
+                    voted = json.loads(result)
+                    if voted["Voted"]:
+                        totalVote+=1
+            except Exception as e:
+                print(f"[Node {self.node_id}] failed to reach node {ne}: {e}", flush=True)
+            
+            if totalVote >= self.N//2+1:
+                with self.lock:
+                    self.state="Leader"
+                    print(f"[Node {self.node_id}] I am the LEADER for term {self.current_term}")
+                    threading.Thread(target=self.Leader,daemon=True).start()
+                break    
     def handle_append_entries(self,conn,payload):
         #Handle request directly from client
         #I Think we need to make Payload["type"] as dictionary , so  payload["type"]["AppendEntries"] == "Leader" if we make "AppendEntries":"Client" or AppendEntries:Server
@@ -96,7 +104,12 @@ class RaftNode:
 
 
     def handle_vote_request(self,payload,conn):
-        if payload["term"] < self.current_term:
+        if payload["term"] > self.current_term:
+            with self.lock:
+                self.current_term = payload["term"]
+                self.votedFor = None
+                self.state = "Follower"
+        elif payload["term"] < self.current_term:
                     response= {"Id":self.node_id,"Voted":False}
                     conn.send(json.dumps(response).encode('utf-8'))
                     conn.close()
@@ -111,34 +124,45 @@ class RaftNode:
                 else:
                     response= {"Id":self.node_id,"Voted":False}
                     conn.send(json.dumps(response).encode('utf-8'))
+            else:
+                response = {"Id": self.node_id, "Voted": False} 
+                conn.send(json.dumps(response).encode('utf-8')) 
+                print("sent false")
     def server(self):
-         with socket.socket(socket.AF_INET,socket.SOCK_STREAM) as sock:
-            sock.bind((self.Host,self.PORT[self.node_id]))
-            sock.listen(128)
-            while True:
-                conn,addr = sock.accept()
-                payload = conn.recv(65552).decode('utf-8')
-                payload = json.loads(payload)
-                if payload["type"] == "vote": 
-                    self.handle_vote_request(payload,conn)
-                elif payload["type"] == "AppendEntries":
-                    self.handle_append_entries(conn,payload)
-                conn.close()
-
-
-            
+        try:
+            with socket.socket(socket.AF_INET,socket.SOCK_STREAM) as sock:
+                sock.bind((self.Host,self.PORT[self.node_id]))
+                print(f"[Node {self.node_id}] Server bound to port {self.PORT[self.node_id]}", flush=True)
+                sock.listen(128)
+                while True:
+                    conn,addr = sock.accept()
+                    payload = conn.recv(65552).decode('utf-8')
+                    payload = json.loads(payload)
+                    if payload["type"] == "vote": 
+                        self.handle_vote_request(payload,conn)
+                    elif payload["type"] == "AppendEntries":
+                        self.handle_append_entries(conn,payload)
+                    conn.close()
+        except Exception as e:
+            print(f"Server Error:{e}")
+    
+        
                 
     def watchdog(self):
+        time.sleep(5)
         while True:
-            if time.time() - self.last_heartbeat > self.election_timemout:
-               with self.lock:
-                    self.current_term+=1
-                    self.state = "Candidate"
-                    self.votedFor = self.node_id
-                    self.election_timemout = random.randint(150,300)/1000
-                    self.last_heartbeat = time.time()
-                    threading.Thread(target=self.send_vote_request,daemon=True).start()
-                    print(f"[Node {self.node_id}] Election timeout! Starting election for term {self.current_term}")
+            try:
+                if time.time() - self.last_heartbeat > self.election_timemout:
+                    with self.lock:
+                        self.current_term+=1
+                        self.state = "Candidate"
+                        self.votedFor = self.node_id
+                        self.election_timemout = random.randint(3000,5000)/1000                        
+                        self.last_heartbeat = time.time()
+                        threading.Thread(target=self.send_vote_request,daemon=True).start()
+                        print(f"[Node {self.node_id}] Election timeout! Starting election for term {self.current_term}")
+            except Exception as e:
+                print(f"Error at watchdog:{e}")
             time.sleep(50/1000)
 
 
