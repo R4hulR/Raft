@@ -24,28 +24,29 @@ class RaftNode:
         self.N = len(self.nei) + 1
         self.leaderID = None
     
-    def send_heartbeat(self):
-        try:
-            for ne in self.nei:
-                with socket.socket(socket.AF_INET,socket.SOCK_STREAM) as sock: 
-                    sock.connect((self.Host,self.PORT[ne]))
-                    with self.lock:
-                        response = {
-                            "type" : "AppendEntries",
-                            "term" : self.current_term,
-                            "leaderID" : self.node_id,
-                            "entries":[]
-                        }
-                    sock.send(json.dumps(response).encode("utf-8"))
-        except Exception as e:
-            print("HeartBeat Errror")
+    # def send_heartbeat(self):
+    #     try:
+    #         for ne in self.nei:
+    #             with socket.socket(socket.AF_INET,socket.SOCK_STREAM) as sock: 
+    #                 sock.connect((self.Host,self.PORT[ne]))
+    #                 with self.lock:
+    #                     response = {
+    #                         "type" : "AppendEntries",
+    #                         "term" : self.current_term,
+    #                         "leaderID" : self.node_id,
+    #                         "entries":[]
+    #                     }
+    #                 sock.send(json.dumps(response).encode("utf-8"))
+    #     except Exception as e:
+    #         print("HeartBeat Errror")
+    
     def Leader(self):
         self.nextIndex = {ne: len(self.log) + 1 for ne in self.nei}
         self.matchIndex = {ne: 0 for ne in self.nei}
         
         while self.state == "Leader":
             self.last_heartbeat = time.time()
-            self.send_heartbeat()
+            self.send_append_entries()
             time.sleep(50/1000)
     
     def send_vote_request(self):
@@ -96,8 +97,9 @@ class RaftNode:
             with self.lock:
                 if self.state == "Candidate":
                     self.state = "Follower"
-                    self.current_term=payload["term"]
-                    self.last_heartbeat = time.time()
+                self.current_term=payload["term"]
+                self.last_heartbeat = time.time()
+                self.leaderID = payload["leaderID"]
             response= {"success":True,"term":self.current_term}
             print(f"[Node {self.node_id}] Heartbeat from leader {payload['leaderID']}")
             conn.send(json.dumps(response).encode("utf-8"))
@@ -147,11 +149,49 @@ class RaftNode:
                         self.handle_vote_request(payload,conn)
                     elif payload["type"] == "AppendEntries":
                         self.handle_append_entries(conn,payload)
+                    elif payload["type"] == "clientRequest":
+                        if self.state == "Leader":
+                            with self.lock:
+                                self.log.append({"term":self.current_term,"command":payload["command"]})
+                            prevLogIndex = len(self.log) - 1
+                            prevLogTerm = self.log[-1]["term"] if self.log else 0
+                            entries = self.log[prevLogIndex:]
+                            self.send_append_entries(entries, prevLogIndex, prevLogTerm)
+                        else:
+                            conn.send(json.dumps({"redirect":self.leaderID}).encode('utf-8'))
                     conn.close()
         except Exception as e:
             print(f"Server Error:{e}")
     
-        
+    
+    def send_append_entries(self,entries=[],prevLogIndex=0,prevLogTerm = 0):
+        confirmations = 1
+        for ne in self.nei:
+            try:
+                with self.lock:
+                    data ={
+                        "type": "AppendEntries",
+                        "term": self.current_term,
+                        "leaderID":self.node_id,
+                        "prevLogIndex":prevLogIndex,
+                        "prevLogTerm":prevLogTerm,
+                        "entries":entries,
+                        "leaderCommit": self.commitIndex
+                    }
+                with socket.socket(socket.AF_INET,socket.SOCK_STREAM) as sock:
+                    sock.connect((self.Host,self.PORT[ne]))
+                    sock.sendall(json.dumps(data).encode("utf-8"))
+                    result= sock.recv(1028).decode('utf-8')
+                    response = json.loads(result)
+                    if response["success"]:
+                        confirmations+=1
+                if confirmations>=self.N//2+1:
+                    with self.lock:
+                        self.commitIndex = len(self.log) -1
+                    print(f"[Node {self.node_id}] Committed index {self.commitIndex}")               
+            except Exception as e:
+                print(e)
+
                 
     def watchdog(self):
         time.sleep(10)
