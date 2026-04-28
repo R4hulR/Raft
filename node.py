@@ -42,7 +42,9 @@ class RaftNode:
     def Leader(self):
         self.nextIndex = {ne: len(self.log) + 1 for ne in self.nei}
         self.matchIndex = {ne: 0 for ne in self.nei}
+        
         while self.state == "Leader":
+            self.last_heartbeat = time.time()
             self.send_heartbeat()
             time.sleep(50/1000)
     
@@ -50,7 +52,7 @@ class RaftNode:
         print(f"[Node {self.node_id}] send_vote_request called for term {self.current_term}", flush=True)
         with self.lock:
             self.state = "Candidate"
-            data = {"type":"vote","term":self.current_term,"candidateId":self.node_id,"lastLogIndex":len(self.log)-1, "lastLogTerm":self.log[len(self.log)-1]["term"] if len(self.log) != 0 else 0}
+            data = {"type":"vote","term":self.current_term,"candidateId":self.node_id,"lastLogIndex": len(self.log) - 1 if len(self.log) != 0 else 0, "lastLogTerm":self.log[len(self.log)-1]["term"] if len(self.log) != 0 else 0}
         payload = json.dumps(data).encode("utf-8")
         totalVote = 1
         
@@ -75,9 +77,9 @@ class RaftNode:
     def handle_append_entries(self,conn,payload):
         #Handle request directly from client
         #I Think we need to make Payload["type"] as dictionary , so  payload["type"]["AppendEntries"] == "Leader" if we make "AppendEntries":"Client" or AppendEntries:Server
-        if payload["type"]["AppendEntries"] == "Client" and self.state!="Leader":
-            #redirect it to Leader
-            pass
+        # if payload["type"]["AppendEntries"] == "Client" and self.state!="Leader":
+        #     #redirect it to Leader
+        #     pass
         #Handle request from Leader
         # Receiver implementation:
         # 1. Reply false if term < currentTerm (§5.1)
@@ -89,21 +91,21 @@ class RaftNode:
         # 4. Append any new entries not already in the log
         # 5. If leaderCommit > commitIndex, set commitIndex =
         # min(leaderCommit, index of last new entry)
-        else:
-            #Hanlde empty entries
-            if payload["term"] >= self.current_term:
-                with self.lock:
-                    if self.state == "Candidate":
-                        self.state = "Follower"
+      
+        if payload["term"] >= self.current_term:
+            with self.lock:
+                if self.state == "Candidate":
+                    self.state = "Follower"
                     self.current_term=payload["term"]
                     self.last_heartbeat = time.time()
-                    response= {"success":True,"term":self.current_term}
-                    print(f"[Node {self.node_id}] Heartbeat from leader {payload['leaderID']}")
-                    conn.send(json.dumps(response).encode("utf-8"))
-                return True
+            response= {"success":True,"term":self.current_term}
+            print(f"[Node {self.node_id}] Heartbeat from leader {payload['leaderID']}")
+            conn.send(json.dumps(response).encode("utf-8"))
+            return True
 
 
     def handle_vote_request(self,payload,conn):
+        print(f"[Node {self.node_id}] got vote request from {payload['candidateId']} term {payload['term']} my term {self.current_term}", flush=True)
         if payload["term"] > self.current_term:
             with self.lock:
                 self.current_term = payload["term"]
@@ -116,7 +118,9 @@ class RaftNode:
                     return
         with self.lock:
             if self.votedFor == None or self.votedFor == payload["candidateId"]:
-                if payload["lastLogIndex"]>=len(self.log) and payload["lastLogTerm"]>=self.log[len(self.log)-1]["term"] if len(self.log) != 0 else 0:
+                print(f"lastLogIndex check: {payload['lastLogIndex']} >= {len(self.log)-1}, lastLogTerm check: {payload['lastLogTerm']} >= 0", flush=True)
+                myLastTerm = self.log[-1]["term"] if self.log else 0
+                if payload["lastLogIndex"] >= len(self.log)-1 and payload["lastLogTerm"] >= myLastTerm:
                     response = {"Id":self.node_id,"Voted":True}
                     self.votedFor= payload["candidateId"]
                     conn.send(json.dumps(response).encode('utf-8'))
@@ -128,6 +132,7 @@ class RaftNode:
                 response = {"Id": self.node_id, "Voted": False} 
                 conn.send(json.dumps(response).encode('utf-8')) 
                 print("sent false")
+    
     def server(self):
         try:
             with socket.socket(socket.AF_INET,socket.SOCK_STREAM) as sock:
@@ -149,7 +154,7 @@ class RaftNode:
         
                 
     def watchdog(self):
-        time.sleep(5)
+        time.sleep(10)
         while True:
             try:
                 if time.time() - self.last_heartbeat > self.election_timemout:
