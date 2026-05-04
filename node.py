@@ -16,13 +16,14 @@ class RaftNode:
         self.state = "Follower"
         self.log = []
         self.votedFor = None
-        self.commitIndex = 0
-        self.lastApplied =0
+        self.commitIndex = -1
+        self.lastApplied = -1
         self.nei = nei
         self.election_timemout = random.randint(3000,5000)/1000
         self.last_heartbeat = time.time()
         self.N = len(self.nei) + 1
         self.leaderID = None
+        self.state_machine = {}
     
     # def send_heartbeat(self):
     #     try:
@@ -74,24 +75,18 @@ class RaftNode:
                     self.state="Leader"
                     print(f"[Node {self.node_id}] I am the LEADER for term {self.current_term}")
                     threading.Thread(target=self.Leader,daemon=True).start()
-                break    
+                break   
+    def apply_entries(self,commitIndex):
+        for i in range(self.lastApplied+1, commitIndex+1):
+            with self.lock:
+                command = self.log[i]["command"]
+                parts = command.split()
+                if parts[0] == "SET":
+                    self.state_machine[parts[1]] = parts[2]
+                self.lastApplied = i
+            
+   
     def handle_append_entries(self,conn,payload):
-        #Handle request directly from client
-        #I Think we need to make Payload["type"] as dictionary , so  payload["type"]["AppendEntries"] == "Leader" if we make "AppendEntries":"Client" or AppendEntries:Server
-        # if payload["type"]["AppendEntries"] == "Client" and self.state!="Leader":
-        #     #redirect it to Leader
-        #     pass
-        #Handle request from Leader
-        # Receiver implementation:
-        # 1. Reply false if term < currentTerm (§5.1)
-        # 2. Reply false if log doesn’t contain an entry at prevLogIndex
-        # whose term matches prevLogTerm (§5.3)
-        # 3. If an existing entry conflicts with a new one (same index
-        # but different terms), delete the existing entry and all that
-        # follow it (§5.3)
-        # 4. Append any new entries not already in the log
-        # 5. If leaderCommit > commitIndex, set commitIndex =
-        # min(leaderCommit, index of last new entry)
       
         if payload["term"] >= self.current_term:
             with self.lock:
@@ -100,10 +95,25 @@ class RaftNode:
                 self.current_term=payload["term"]
                 self.last_heartbeat = time.time()
                 self.leaderID = payload["leaderID"]
-            response= {"success":True,"term":self.current_term}
-            print(f"[Node {self.node_id}] Heartbeat from leader {payload['leaderID']}")
+            if payload["entries"] :
+                prevLogIndex = payload["prevLogIndex"]
+                prevLogTerm = payload["prevLogTerm"]
+                if prevLogIndex < len(self.log):
+                    if self.log[prevLogIndex]["term"]!=prevLogTerm:
+                        self.log = self.log[:prevLogIndex]
+                        #Term conflict, delete anything after it
+                    self.log.extend(payload["entries"])
+                elif prevLogIndex == 0:
+                    self.log.extend(payload["entries"]) 
+                else:
+                    conn.send(json.dumps({"success":False,"term":self.current_term}).encode("utf-8"))
+                    return
+            if payload["leaderCommit"] > self.commitIndex:
+                self.commitIndex = min(payload["leaderCommit"], len(self.log) - 1)
+                self.apply_entries(self.commitIndex)
+            response = {"success":True,"term":self.current_term}
             conn.send(json.dumps(response).encode("utf-8"))
-            return True
+    
 
 
     def handle_vote_request(self,payload,conn):
@@ -157,8 +167,16 @@ class RaftNode:
                             prevLogTerm = self.log[-1]["term"] if self.log else 0
                             entries = self.log[prevLogIndex:]
                             self.send_append_entries(entries, prevLogIndex, prevLogTerm)
+                            conn.send(json.dumps({"success": True}).encode('utf-8'))
+                            conn.close()
                         else:
                             conn.send(json.dumps({"redirect":self.leaderID}).encode('utf-8'))
+                    elif payload["type"] == "query":
+                        conn.send(json.dumps({
+                            "log": self.log,
+                            "state_machine": self.state_machine,
+                            "state": self.state
+                        }).encode('utf-8'))
                     conn.close()
         except Exception as e:
             print(f"Server Error:{e}")
@@ -185,9 +203,11 @@ class RaftNode:
                     response = json.loads(result)
                     if response["success"]:
                         confirmations+=1
-                if confirmations>=self.N//2+1:
+                if confirmations>=self.N//2+1 and entries:
                     with self.lock:
                         self.commitIndex = len(self.log) -1
+                        print(f"[Node {self.node_id}] commitIndex updated to {self.commitIndex}", flush=True)
+                    self.apply_entries(self.commitIndex)
                     print(f"[Node {self.node_id}] Committed index {self.commitIndex}")               
             except Exception as e:
                 print(e)
