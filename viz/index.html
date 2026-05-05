@@ -1,0 +1,692 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Raft Consensus Visualizer</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Space+Grotesk:wght@300;400;600&display=swap');
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: #0a0a0f;
+    color: #e0e0e8;
+    font-family: 'Space Grotesk', sans-serif;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  .grid-bg {
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(99,102,241,0.04) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(99,102,241,0.04) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .container {
+    position: relative;
+    z-index: 1;
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 2rem 1.5rem;
+  }
+
+  header {
+    display: flex;
+    align-items: baseline;
+    gap: 1rem;
+    margin-bottom: 2.5rem;
+  }
+
+  h1 {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: #a5b4fc;
+    letter-spacing: 0.05em;
+  }
+
+  .subtitle {
+    font-size: 0.8rem;
+    color: #4a4a6a;
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  .status-bar {
+    display: flex;
+    gap: 1.5rem;
+    margin-bottom: 2rem;
+    padding: 0.75rem 1rem;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(99,102,241,0.15);
+    border-radius: 8px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.75rem;
+  }
+
+  .status-item { display: flex; gap: 0.5rem; align-items: center; }
+  .status-label { color: #4a4a6a; }
+  .status-value { color: #a5b4fc; }
+  #leader-display { color: #34d399; }
+  #term-display { color: #fbbf24; }
+
+  .main-grid {
+    display: grid;
+    grid-template-columns: 1fr 320px;
+    gap: 1.5rem;
+  }
+
+  .nodes-section {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+
+  .section-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.7rem;
+    color: #4a4a6a;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    margin-bottom: 0.5rem;
+  }
+
+  .nodes-canvas {
+    position: relative;
+    height: 320px;
+    background: rgba(255,255,255,0.02);
+    border: 1px solid rgba(99,102,241,0.1);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+
+  svg#network { width: 100%; height: 100%; }
+
+  .node-circle {
+    cursor: pointer;
+    transition: all 0.3s ease;
+  }
+
+  .node-circle:hover .node-bg { filter: brightness(1.3); }
+
+  .pulse-ring {
+    animation: pulse 2s infinite;
+    transform-origin: center;
+  }
+
+  @keyframes pulse {
+    0% { opacity: 0.6; transform: scale(1); }
+    50% { opacity: 0; transform: scale(1.8); }
+    100% { opacity: 0; transform: scale(1.8); }
+  }
+
+  .nodes-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .node-card {
+    display: grid;
+    grid-template-columns: auto 1fr auto auto;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.6rem 0.9rem;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(99,102,241,0.1);
+    border-radius: 8px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.75rem;
+    transition: border-color 0.3s;
+  }
+
+  .node-card.is-leader {
+    border-color: rgba(52,211,153,0.4);
+    background: rgba(52,211,153,0.04);
+  }
+
+  .node-card.is-dead {
+    opacity: 0.35;
+    border-color: rgba(239,68,68,0.2);
+  }
+
+  .node-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #4a4a6a;
+    flex-shrink: 0;
+  }
+
+  .node-dot.follower { background: #6366f1; }
+  .node-dot.leader { background: #34d399; box-shadow: 0 0 8px #34d39966; }
+  .node-dot.candidate { background: #fbbf24; }
+  .node-dot.dead { background: #ef4444; }
+
+  .node-id { color: #e0e0e8; font-weight: 600; }
+  .node-state { color: #4a4a6a; }
+  .node-state.leader { color: #34d399; }
+  .node-state.candidate { color: #fbbf24; }
+
+  .node-term { color: #6366f1; }
+  .node-log-count { color: #4a4a6a; }
+
+  .kill-btn {
+    padding: 0.2rem 0.5rem;
+    background: transparent;
+    border: 1px solid rgba(239,68,68,0.3);
+    border-radius: 4px;
+    color: #ef4444;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.65rem;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .kill-btn:hover { background: rgba(239,68,68,0.1); border-color: rgba(239,68,68,0.6); }
+  .kill-btn.revive { color: #34d399; border-color: rgba(52,211,153,0.3); }
+  .kill-btn.revive:hover { background: rgba(52,211,153,0.1); border-color: rgba(52,211,153,0.6); }
+
+  .right-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+
+  .panel-box {
+    background: rgba(255,255,255,0.02);
+    border: 1px solid rgba(99,102,241,0.1);
+    border-radius: 10px;
+    padding: 1rem;
+  }
+
+  .panel-title {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.7rem;
+    color: #4a4a6a;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    margin-bottom: 0.75rem;
+  }
+
+  .command-input-row {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+  }
+
+  .cmd-input {
+    flex: 1;
+    padding: 0.4rem 0.6rem;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(99,102,241,0.2);
+    border-radius: 6px;
+    color: #e0e0e8;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.75rem;
+    outline: none;
+  }
+
+  .cmd-input:focus { border-color: rgba(99,102,241,0.5); }
+
+  .send-btn {
+    padding: 0.4rem 0.75rem;
+    background: rgba(99,102,241,0.2);
+    border: 1px solid rgba(99,102,241,0.4);
+    border-radius: 6px;
+    color: #a5b4fc;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.75rem;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .send-btn:hover { background: rgba(99,102,241,0.35); }
+
+  .quick-cmds {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+  }
+
+  .quick-cmd {
+    padding: 0.2rem 0.5rem;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(99,102,241,0.15);
+    border-radius: 4px;
+    color: #6366f1;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.65rem;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .quick-cmd:hover { background: rgba(99,102,241,0.1); border-color: rgba(99,102,241,0.3); }
+
+  .log-feed {
+    max-height: 160px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+  }
+
+  .log-entry {
+    display: flex;
+    gap: 0.5rem;
+    align-items: baseline;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.7rem;
+    padding: 0.25rem 0;
+    border-bottom: 1px solid rgba(99,102,241,0.06);
+    animation: fadeIn 0.3s ease;
+  }
+
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; } }
+
+  .log-time { color: #4a4a6a; flex-shrink: 0; }
+  .log-msg { color: #a0a0c0; }
+  .log-msg.success { color: #34d399; }
+  .log-msg.error { color: #ef4444; }
+  .log-msg.info { color: #a5b4fc; }
+
+  .state-machine-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.75rem;
+    max-height: 120px;
+    overflow-y: auto;
+  }
+
+  .kv-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 0.2rem 0;
+    border-bottom: 1px solid rgba(99,102,241,0.06);
+  }
+
+  .kv-key { color: #6366f1; }
+  .kv-val { color: #34d399; }
+
+  .empty-state {
+    color: #2a2a4a;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.7rem;
+    text-align: center;
+    padding: 1rem 0;
+  }
+
+  .refresh-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.7rem;
+    color: #4a4a6a;
+  }
+
+  .dot-blink {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #34d399;
+    animation: blink 1.5s infinite;
+  }
+
+  @keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: 0.2; } }
+
+  ::-webkit-scrollbar { width: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: rgba(99,102,241,0.2); border-radius: 2px; }
+</style>
+</head>
+<body>
+<div class="grid-bg"></div>
+<div class="container">
+  <header>
+    <h1>// raft visualizer</h1>
+    <span class="subtitle">5-node cluster · localhost</span>
+    <span style="margin-left:auto" class="refresh-indicator">
+      <span class="dot-blink"></span> polling
+    </span>
+  </header>
+
+  <div class="status-bar">
+    <div class="status-item"><span class="status-label">leader</span><span class="status-value" id="leader-display">—</span></div>
+    <div class="status-item"><span class="status-label">term</span><span class="status-value" id="term-display">—</span></div>
+    <div class="status-item"><span class="status-label">alive</span><span class="status-value" id="alive-display">—</span></div>
+    <div class="status-item"><span class="status-label">log entries</span><span class="status-value" id="log-count-display">—</span></div>
+  </div>
+
+  <div class="main-grid">
+    <div class="nodes-section">
+      <div class="section-label">network topology</div>
+      <div class="nodes-canvas">
+        <svg id="network" viewBox="0 0 500 300">
+          <defs>
+            <marker id="arr" markerWidth="6" markerHeight="6" refX="3" refY="3" orient="auto">
+              <path d="M0,0 L0,6 L6,3 z" fill="rgba(99,102,241,0.3)"/>
+            </marker>
+          </defs>
+          <g id="edges"></g>
+          <g id="nodes-svg"></g>
+        </svg>
+      </div>
+
+      <div class="section-label" style="margin-top:0.5rem">node status</div>
+      <div class="nodes-list" id="nodes-list"></div>
+    </div>
+
+    <div class="right-panel">
+      <div class="panel-box">
+        <div class="panel-title">send command</div>
+        <div class="command-input-row">
+          <input class="cmd-input" id="cmd-input" placeholder="SET key value" />
+          <button class="send-btn" onclick="sendCommand()">send</button>
+        </div>
+        <div class="quick-cmds">
+          <span class="quick-cmd" onclick="setCmd('SET x 5')">SET x 5</span>
+          <span class="quick-cmd" onclick="setCmd('SET y 10')">SET y 10</span>
+          <span class="quick-cmd" onclick="setCmd('SET z 99')">SET z 99</span>
+          <span class="quick-cmd" onclick="setCmd('SET counter 1')">SET counter 1</span>
+        </div>
+      </div>
+
+      <div class="panel-box">
+        <div class="panel-title">state machine</div>
+        <div class="state-machine-grid" id="state-machine">
+          <div class="empty-state">no data yet</div>
+        </div>
+      </div>
+
+      <div class="panel-box" style="flex:1">
+        <div class="panel-title">event log</div>
+        <div class="log-feed" id="log-feed">
+          <div class="log-entry"><span class="log-time">--:--:--</span><span class="log-msg info">connecting to cluster...</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const PORTS = {0:5000,1:5001,2:5002,3:5003,4:5004};
+const NODE_COUNT = 5;
+const BASE_URL = 'http://localhost';
+
+let nodeStates = {};
+let deadNodes = new Set();
+let prevLeader = null;
+
+const NODE_POSITIONS = [
+  {x: 250, y: 60},
+  {x: 420, y: 160},
+  {x: 350, y: 270},
+  {x: 150, y: 270},
+  {x: 80, y: 160},
+];
+
+function addLog(msg, type='') {
+  const feed = document.getElementById('log-feed');
+  const now = new Date();
+  const t = `${now.getHours().toString().padStart(2,'0')}:${now.getMinutes().toString().padStart(2,'0')}:${now.getSeconds().toString().padStart(2,'0')}`;
+  const el = document.createElement('div');
+  el.className = 'log-entry';
+  el.innerHTML = `<span class="log-time">${t}</span><span class="log-msg ${type}">${msg}</span>`;
+  feed.insertBefore(el, feed.firstChild);
+  while(feed.children.length > 50) feed.removeChild(feed.lastChild);
+}
+
+async function queryNode(id) {
+  if(deadNodes.has(id)) return null;
+  try {
+    const r = await fetch(`${BASE_URL}:${PORTS[id]}`, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({type:'query'}),
+      signal: AbortSignal.timeout(800)
+    });
+    return await r.json();
+  } catch(e) { return null; }
+}
+
+async function pollAll() {
+  let leaderNode = null;
+  let maxTerm = 0;
+  let aliveCount = 0;
+  let maxLog = 0;
+  let leaderStateMachine = {};
+
+  for(let i = 0; i < NODE_COUNT; i++) {
+    if(deadNodes.has(i)) {
+      nodeStates[i] = {state:'dead', term:0, log:[], state_machine:{}};
+      continue;
+    }
+    const data = await queryNode(i);
+    if(!data) {
+      nodeStates[i] = {state:'unreachable', term:0, log:[], state_machine:{}};
+    } else {
+      nodeStates[i] = data;
+      aliveCount++;
+      if(data.state === 'Leader') {
+        leaderNode = i;
+        leaderStateMachine = data.state_machine || {};
+      }
+      if((data.term||0) > maxTerm) maxTerm = data.term||0;
+      if((data.log||[]).length > maxLog) maxLog = (data.log||[]).length;
+    }
+  }
+
+  if(leaderNode !== null && leaderNode !== prevLeader) {
+    addLog(`node ${leaderNode} elected leader (term ${maxTerm})`, 'info');
+    prevLeader = leaderNode;
+  }
+
+  document.getElementById('leader-display').textContent = leaderNode !== null ? `node ${leaderNode}` : 'none';
+  document.getElementById('term-display').textContent = maxTerm || '—';
+  document.getElementById('alive-display').textContent = `${aliveCount}/${NODE_COUNT}`;
+  document.getElementById('log-count-display').textContent = maxLog;
+
+  renderStateMachine(leaderStateMachine);
+  renderNodesList();
+  renderSVG();
+}
+
+function renderStateMachine(sm) {
+  const el = document.getElementById('state-machine');
+  const keys = Object.keys(sm);
+  if(keys.length === 0) {
+    el.innerHTML = '<div class="empty-state">no data yet</div>';
+    return;
+  }
+  el.innerHTML = keys.map(k => `
+    <div class="kv-row">
+      <span class="kv-key">${k}</span>
+      <span class="kv-val">${sm[k]}</span>
+    </div>
+  `).join('');
+}
+
+function renderNodesList() {
+  const container = document.getElementById('nodes-list');
+  container.innerHTML = '';
+  for(let i = 0; i < NODE_COUNT; i++) {
+    const s = nodeStates[i] || {};
+    const isDead = deadNodes.has(i) || s.state === 'unreachable';
+    const isLeader = s.state === 'Leader';
+    const state = isDead ? 'dead' : (s.state || 'unknown');
+    const dotClass = isDead ? 'dead' : state.toLowerCase();
+    const logLen = (s.log || []).length;
+
+    const card = document.createElement('div');
+    card.className = `node-card${isLeader?' is-leader':''}${isDead?' is-dead':''}`;
+    card.innerHTML = `
+      <span class="node-dot ${dotClass}"></span>
+      <span class="node-id">node ${i}</span>
+      <span class="node-state ${dotClass}">${state.toLowerCase()}</span>
+      <span class="node-term">t${s.term||0}</span>
+      <span class="node-log-count">${logLen} entries</span>
+      <button class="kill-btn ${isDead?'revive':''}" onclick="toggleNode(${i})">
+        ${isDead ? 'revive' : 'kill'}
+      </button>
+    `;
+    container.appendChild(card);
+  }
+}
+
+function renderSVG() {
+  const edgesG = document.getElementById('edges');
+  const nodesG = document.getElementById('nodes-svg');
+  edgesG.innerHTML = '';
+  nodesG.innerHTML = '';
+
+  for(let i = 0; i < NODE_COUNT; i++) {
+    for(let j = i+1; j < NODE_COUNT; j++) {
+      const p1 = NODE_POSITIONS[i];
+      const p2 = NODE_POSITIONS[j];
+      const line = document.createElementNS('http://www.w3.org/2000/svg','line');
+      line.setAttribute('x1', p1.x); line.setAttribute('y1', p1.y);
+      line.setAttribute('x2', p2.x); line.setAttribute('y2', p2.y);
+      line.setAttribute('stroke', 'rgba(99,102,241,0.1)');
+      line.setAttribute('stroke-width', '1');
+      edgesG.appendChild(line);
+    }
+  }
+
+  for(let i = 0; i < NODE_COUNT; i++) {
+    const pos = NODE_POSITIONS[i];
+    const s = nodeStates[i] || {};
+    const isDead = deadNodes.has(i) || s.state === 'unreachable';
+    const isLeader = s.state === 'Leader';
+    const isCandidate = s.state === 'Candidate';
+
+    const g = document.createElementNS('http://www.w3.org/2000/svg','g');
+    g.setAttribute('transform', `translate(${pos.x},${pos.y})`);
+    g.style.cursor = 'pointer';
+
+    if(isLeader) {
+      const pulse = document.createElementNS('http://www.w3.org/2000/svg','circle');
+      pulse.setAttribute('r','26');
+      pulse.setAttribute('fill','none');
+      pulse.setAttribute('stroke','#34d399');
+      pulse.setAttribute('stroke-width','1.5');
+      pulse.setAttribute('opacity','0.5');
+      pulse.classList.add('pulse-ring');
+      g.appendChild(pulse);
+    }
+
+    const circle = document.createElementNS('http://www.w3.org/2000/svg','circle');
+    circle.setAttribute('r','20');
+    circle.setAttribute('fill', isDead ? '#1a0a0a' : isLeader ? '#0d2b1f' : isCandidate ? '#1a1500' : '#0d0d1f');
+    circle.setAttribute('stroke', isDead ? '#3a1010' : isLeader ? '#34d399' : isCandidate ? '#fbbf24' : '#3a3a7a');
+    circle.setAttribute('stroke-width', isLeader ? '2' : '1');
+    g.appendChild(circle);
+
+    const label = document.createElementNS('http://www.w3.org/2000/svg','text');
+    label.setAttribute('text-anchor','middle');
+    label.setAttribute('dy','0.35em');
+    label.setAttribute('font-size','11');
+    label.setAttribute('font-family','JetBrains Mono, monospace');
+    label.setAttribute('font-weight','600');
+    label.setAttribute('fill', isDead ? '#3a1010' : isLeader ? '#34d399' : isCandidate ? '#fbbf24' : '#6366f1');
+    label.textContent = `N${i}`;
+    g.appendChild(label);
+
+    const stateLabel = document.createElementNS('http://www.w3.org/2000/svg','text');
+    stateLabel.setAttribute('text-anchor','middle');
+    stateLabel.setAttribute('dy','2.2em');
+    stateLabel.setAttribute('font-size','8');
+    stateLabel.setAttribute('font-family','JetBrains Mono, monospace');
+    stateLabel.setAttribute('fill', isDead ? '#3a1010' : '#2a2a5a');
+    stateLabel.textContent = isDead ? 'dead' : (s.state||'').toLowerCase();
+    g.appendChild(stateLabel);
+
+    nodesG.appendChild(g);
+  }
+}
+
+function toggleNode(id) {
+  if(deadNodes.has(id)) {
+    deadNodes.delete(id);
+    addLog(`node ${id} revived`, 'success');
+  } else {
+    deadNodes.add(id);
+    addLog(`node ${id} killed`, 'error');
+    if(nodeStates[id] && nodeStates[id].state === 'Leader') {
+      addLog('leader down — waiting for re-election...', 'info');
+    }
+  }
+  renderNodesList();
+  renderSVG();
+}
+
+async function sendCommand() {
+  const input = document.getElementById('cmd-input');
+  const cmd = input.value.trim();
+  if(!cmd) return;
+
+  let targetNode = -1;
+  for(let i = 0; i < NODE_COUNT; i++) {
+    if(nodeStates[i] && nodeStates[i].state === 'Leader' && !deadNodes.has(i)) {
+      targetNode = i;
+      break;
+    }
+  }
+
+  if(targetNode === -1) {
+    for(let i = 0; i < NODE_COUNT; i++) {
+      if(!deadNodes.has(i)) { targetNode = i; break; }
+    }
+  }
+
+  if(targetNode === -1) { addLog('no alive nodes', 'error'); return; }
+
+  addLog(`sending "${cmd}" to node ${targetNode}`, '');
+  try {
+    const r = await fetch(`${BASE_URL}:${PORTS[targetNode]}`, {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({type:'clientRequest', command:cmd}),
+      signal: AbortSignal.timeout(3000)
+    });
+    const data = await r.json();
+    if(data.redirect !== undefined) {
+      addLog(`redirected to node ${data.redirect}`, 'info');
+      const r2 = await fetch(`${BASE_URL}:${PORTS[data.redirect]}`, {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({type:'clientRequest', command:cmd}),
+        signal: AbortSignal.timeout(3000)
+      });
+      const d2 = await r2.json();
+      if(d2.success) addLog(`committed: ${cmd}`, 'success');
+    } else if(data.success) {
+      addLog(`committed: ${cmd}`, 'success');
+    }
+  } catch(e) {
+    addLog(`failed: ${e.message}`, 'error');
+  }
+  input.value = '';
+}
+
+function setCmd(cmd) {
+  document.getElementById('cmd-input').value = cmd;
+}
+
+document.getElementById('cmd-input').addEventListener('keydown', e => {
+  if(e.key === 'Enter') sendCommand();
+});
+
+renderSVG();
+setInterval(pollAll, 1500);
+pollAll();
+</script>
+</body>
+</html>
