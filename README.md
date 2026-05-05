@@ -148,4 +148,3 @@ It was really challenging to debug distributed systems without shared memory or 
 ## References
 
 - [In Search of an Understandable Consensus Algorithm (Raft paper)](https://raft.github.io/raft.pdf) — Ongaro & Ousterhout, 2014
-- [Raft visualization](https://raft.github.io) — interactive explainer
