@@ -16,4 +16,3 @@ Milestone 4 — Visualization
 
 Simple frontend showing node states, log, term
 Kill button for nodes
-This is your demo piece
