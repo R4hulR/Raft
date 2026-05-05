@@ -210,7 +210,8 @@ class RaftNode:
                     self.apply_entries(self.commitIndex)
                     print(f"[Node {self.node_id}] Committed index {self.commitIndex}")               
             except Exception as e:
-                print(e)
+                if "10061" not in str(e):
+                    print(e)
 
                 
     def watchdog(self):

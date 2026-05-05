@@ -24,7 +24,8 @@ def get_log(node_id):
 
 
 
-send_request(0, "SET x 5")
+send_request(4, "SET x 5")
 
 for i in range(5):
-    get_log(i)
+    if i !=1:
+        get_log(i)
