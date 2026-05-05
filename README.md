@@ -2,15 +2,15 @@
 
 A from-scratch implementation of the Raft distributed consensus algorithm in Python, with a live visualization frontend.
 
-Built as a learning project to understand how distributed systems maintain consistency across multiple nodes — even when nodes crash or network messages get lost.
+Built as a learning project to understand how distributed systems maintain consistency across multiple nodes, even when nodes crash or network messages get lost.
 
 ---
 
 ## What is Raft?
 
-Raft is a consensus algorithm — a way to get a cluster of servers to agree on a shared state (like a key-value store) even in the face of failures. It was designed to be easier to understand than Paxos, and it works by electing a single leader who coordinates all writes.
+Raft is a consensus algorithm , a way to get a cluster of servers to agree on a shared state (like a key-value store) even in the face of failures. It was designed to be easier to understand than Paxos, and it works by electing a single leader who coordinates all writes.
 
-If the leader crashes, the remaining nodes automatically elect a new one. Clients can write to any node — followers redirect to the leader automatically.
+If the leader crashes, the remaining nodes automatically elect a new one. Clients can write to any node, followers redirect to the leader automatically.
 
 ---
 
@@ -18,7 +18,7 @@ If the leader crashes, the remaining nodes automatically elect a new one. Client
 
 There are two lenses to see through the Raft algorithm: one from an algorithmic point of view and another from a distributed systems perspective.
 
-Raft is a **consensus algorithm** for managing a **replicated log**. Consensus algorithms typically arise in the context of replicated state machines. A state machine is a machine running on a server that responds to external stimuli like a client. By extension, replicated state machines are multiple copies of that machine running on different servers, all processing the same sequence of inputs to produce the same sequence of outputs and state — making them deterministic. These machines are typically implemented using a replicated log: each server stores a log containing a series of commands which its state machine executes in order. Keeping that log consistent is the job of the consensus algorithm — it allows a collection of machines to work as a coherent group that can survive the failures of some of its members.
+Raft is a **consensus algorithm** for managing a **replicated log**. Consensus algorithms typically arise in the context of replicated state machines. A state machine is a machine running on a server that responds to external stimuli like a client. By extension, replicated state machines are multiple copies of that machine running on different servers, all processing the same sequence of inputs to produce the same sequence of outputs and state, making them deterministic. These machines are typically implemented using a replicated log: each server stores a log containing a series of commands which its state machine executes in order. Keeping that log consistent is the job of the consensus algorithm, it allows a collection of machines to work as a coherent group that can survive the failures of some of its members.
 
 Here's an architecture of Raft.
 ![Raft Architecture](assets/Diagram.png)
@@ -33,9 +33,9 @@ Raft was designed as an alternative to Leslie Lamport's Paxos protocol. It decom
 
 Raft uses a heartbeat mechanism to trigger leader election. When servers start up, they begin as followers. A server remains a follower as long as it receives valid RPCs from a leader or candidate. Raft uses two types of RPCs: `RequestVote`, initiated by candidates during elections, and `AppendEntries`, initiated by the leader to replicate log entries and send periodic heartbeats.
 
-If a follower receives no heartbeat over a period called the **election timeout**, it assumes there is no leader and begins an election. Raft divides time into **terms** of arbitrary length — each term begins with an election. To start one, a follower increments its term, transitions to candidate, votes for itself, and sends `RequestVote` RPCs to all other servers.
+If a follower receives no heartbeat over a period called the **election timeout**, it assumes there is no leader and begins an election. Raft divides time into **terms** of arbitrary length, each term begins with an election. To start one, a follower increments its term, transitions to candidate, votes for itself, and sends `RequestVote` RPCs to all other servers.
 
-A candidate wins if it receives votes from a majority. Votes are given on a first-come-first-served basis — each server votes for at most one candidate per term. Once elected, the leader immediately sends heartbeats to establish authority and prevent new elections.
+A candidate wins if it receives votes from a majority. Votes are given on a first-come-first-served basis, each server votes for at most one candidate per term. Once elected, the leader immediately sends heartbeats to establish authority and prevent new elections.
 
 If a candidate receives an `AppendEntries` RPC from a server claiming to be leader: if the leader's term is at least as large as the candidate's, it recognizes the leader as legitimate and steps down to follower. If the term is smaller, it rejects the RPC and continues as candidate.
 
@@ -130,9 +130,9 @@ Kill the leader by pressing `Ctrl+C` in its terminal. Watch the other nodes dete
 
 ## What I learned
 
-This project taught me how distributed systems handle the fundamental tension between availability and consistency. The tricky parts weren't the happy path — they were the edge cases: what happens when two candidates start an election simultaneously, what happens when a leader comes back from a crash with a stale term, and how to prevent a node from voting twice in the same term.
+I learned how distributed systems manage the basic conflict between consistency and availability from this project. The edge cases—what happens when two candidates begin an election at the same time, what happens when a leader returns from a crash with a stale term, and how to stop a node from voting twice in the same term—were more difficult than the pleasant road.
 
-Debugging distributed systems without shared memory or a single debugger was genuinely hard. I learned to reason about concurrent state changes, use structured logging across processes, and test by simulating failures manually.
+It was really challenging to debug distributed systems without shared memory or a single debugger. I gained knowledge about how to leverage structured logging across processes, reason about concurrent state changes, and test by manually simulating errors.
 
 ---
 
