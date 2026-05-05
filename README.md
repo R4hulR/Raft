@@ -130,8 +130,7 @@ Kill the leader by pressing `Ctrl+C` in its terminal. Watch the other nodes dete
 
 ## What I learned
 
-I learned how distributed systems manage the basic conflict between consistency and availability from this project. The edge cases—what happens when two candidates begin an election at the same time, what happens when a leader returns from a crash with a stale term, and how to stop a node from voting twice in the same term—were more difficult than the pleasant road.
-
+I learned how distributed systems manage the basic conflict between consistency and availability from this project. The edge cases,what happens when two candidates begin an election at the same time, what happens when a leader returns from a crash with a stale term, and how to stop a node from voting twice in the same term—were more difficult.
 It was really challenging to debug distributed systems without shared memory or a single debugger. I gained knowledge about how to leverage structured logging across processes, reason about concurrent state changes, and test by manually simulating errors.
 
 ---
